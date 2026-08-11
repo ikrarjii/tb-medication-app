@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "712116554051",
+    "project_id": "drugcontrol-a35e2",
+    "storage_bucket": "drugcontrol-a35e2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:712116554051:android:21efa03267e73727c5c7f6",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAIJViirgLQNuTRSf4Uj4ydcBYaSnJoIY4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

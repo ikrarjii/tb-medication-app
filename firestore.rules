@@ -1,0 +1,655 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function ownUser(userId) { return signedIn() && request.auth.uid == userId; }
+    function role(name) {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == name;
+    }
+    function connected(caregiverId, patientId) {
+      return exists(/databases/$(database)/documents/pairings/$(caregiverId + '_' + patientId));
+    }
+    function caregiverFor(patientId) {
+      return role('caregiver') && connected(request.auth.uid, patientId);
+    }
+    function changed(field) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny([field]);
+    }
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+    function changedToRequestTimeOrNull(field) {
+      return !changed(field) ||
+        request.resource.data.get(field, null) == null ||
+        request.resource.data.get(field, null) == request.time;
+    }
+    function changedOnceToRequestTime(field) {
+      return !changed(field) ||
+        (resource.data.get(field, null) == null &&
+          request.resource.data.get(field, null) == request.time);
+    }
+    function validPatientDemographics(data) {
+      return data.age is int && data.age >= 0 && data.age <= 120 &&
+        data.gender in ['male', 'female'] &&
+        ((data.age < 18 && data.ageCategory == 'Anak') ||
+         (data.age >= 18 && data.ageCategory == 'Dewasa'));
+    }
+    function validNewUser() {
+      let data = request.resource.data;
+      return data.role == 'caregiver' ||
+        (data.role == 'patient' && validPatientDemographics(data) &&
+         data.treatmentGroup in ['group1', 'other'] &&
+         data.treatmentStartedAt == request.time);
+    }
+    function validMedicineShape(data) {
+      return data.patientId is string &&
+        data.caregiverId is string &&
+        data.name is string && data.name.size() > 0 &&
+        data.dosage is string &&
+        data.scheduledAt is timestamp;
+    }
+    function validOptionalScheduleRevision(data) {
+      return data.get('scheduleRevision', null) == null ||
+        (data.scheduleRevision is int && data.scheduleRevision >= 0);
+    }
+    function medicationDosageMatches(logDosage, medicine) {
+      return logDosage == medicine.get('dosage', null) ||
+        (logDosage == null && medicine.get('dosage', null) == '');
+    }
+    function validNewPendingMedicine() {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'caregiverId', 'patientId', 'name', 'dosage', 'scheduledAt',
+          'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'caregiverId', 'patientId', 'name', 'dosage', 'scheduledAt',
+          'status', 'createdAt', 'updatedAt', 'reminderTriggeredAt',
+          'deviceTriggeredAt', 'deviceTriggerPushedAt', 'dueNotifiedAt',
+          'lateNotifiedAt', 'snoozedUntil',
+          'lastSnoozedAt', 'snoozeCount', 'dismissedAt', 'missedAt',
+          'responseAction', 'alarmState', 'scheduleRevision', 'takenAt',
+          'respondedAt', 'systemGenerated', 'treatmentGroup', 'treatmentDay'
+        ]) &&
+        validMedicineShape(data) &&
+        data.status == 'pending' &&
+        data.createdAt == request.time &&
+        data.updatedAt == request.time &&
+        data.get('reminderTriggeredAt', null) == null &&
+        data.get('deviceTriggeredAt', null) == null &&
+        data.get('deviceTriggerPushedAt', null) == null &&
+        data.get('dueNotifiedAt', null) == null &&
+        data.get('lateNotifiedAt', null) == null &&
+        data.get('snoozedUntil', null) == null &&
+        data.get('lastSnoozedAt', null) == null &&
+        data.get('snoozeCount', null) in [null, 0] &&
+        data.get('dismissedAt', null) == null &&
+        data.get('missedAt', null) == null &&
+        data.get('responseAction', null) == null &&
+        data.get('alarmState', null) in [null, 'scheduled'] &&
+        data.get('takenAt', null) == null &&
+        data.get('respondedAt', null) == null &&
+        data.systemGenerated == true &&
+        data.treatmentGroup == 'group1' &&
+        data.treatmentDay is string && data.treatmentDay.size() == 8 &&
+        validOptionalScheduleRevision(data);
+    }
+    function validCaregiverScheduleRevision() {
+      return !changed('scheduleRevision') ||
+        (request.resource.data.scheduleRevision is int &&
+          ((resource.data.get('scheduleRevision', null) == null &&
+              request.resource.data.scheduleRevision == 1) ||
+           (resource.data.get('scheduleRevision', null) is int &&
+              request.resource.data.scheduleRevision ==
+                resource.data.scheduleRevision + 1)));
+    }
+    function validCaregiverMedicineUpdate() {
+      let data = request.resource.data;
+      return resource.data.status == 'pending' && data.status == 'pending' &&
+        validMedicineShape(data) &&
+        changedOnly([
+          'scheduledAt', 'updatedAt',
+          'reminderTriggeredAt', 'deviceTriggeredAt',
+          'deviceTriggerPushedAt', 'dueNotifiedAt', 'lateNotifiedAt',
+          'snoozedUntil', 'lastSnoozedAt', 'snoozeCount', 'dismissedAt',
+          'missedAt', 'responseAction', 'alarmState', 'scheduleRevision',
+          'takenAt', 'respondedAt'
+        ]) &&
+        changed('updatedAt') && data.updatedAt == request.time &&
+        data.get('reminderTriggeredAt', null) == null &&
+        data.get('deviceTriggeredAt', null) == null &&
+        data.get('deviceTriggerPushedAt', null) == null &&
+        data.get('dueNotifiedAt', null) == null &&
+        data.get('lateNotifiedAt', null) == null &&
+        data.get('snoozedUntil', null) == null &&
+        data.get('lastSnoozedAt', null) == null &&
+        data.get('snoozeCount', null) in [null, 0] &&
+        data.get('dismissedAt', null) == null &&
+        data.get('missedAt', null) == null &&
+        data.get('responseAction', null) == null &&
+        data.get('alarmState', null) in [null, 'scheduled'] &&
+        data.get('takenAt', null) == null &&
+        data.get('respondedAt', null) == null &&
+        resource.data.get('systemGenerated', false) == true &&
+        data.systemGenerated == true &&
+        data.treatmentGroup == resource.data.treatmentGroup &&
+        data.treatmentDay == resource.data.treatmentDay &&
+        validCaregiverScheduleRevision();
+    }
+
+    function validOwnUserUpdate() {
+      let data = request.resource.data;
+      let patient = resource.data.role == 'patient';
+      let demographicsValid = !patient ||
+        ((!changed('age') && !changed('ageCategory') && !changed('gender')) ||
+         validPatientDemographics(data));
+      let treatmentLocked = !patient ||
+        ((!changed('treatmentGroup') ||
+            (resource.data.get('treatmentGroup', null) == null &&
+             data.treatmentGroup == 'group1')) &&
+         (!changed('treatmentStartedAt') ||
+            (resource.data.get('treatmentStartedAt', null) == null &&
+             data.treatmentStartedAt == request.time)) &&
+         !changed('medicationHour') && !changed('medicationMinute') &&
+         !changed('medicationTimeUpdatedBy') &&
+         !changed('medicationTimeUpdatedAt'));
+      return data.role == resource.data.role && treatmentLocked &&
+        demographicsValid &&
+        (data.get('patientCode', null) == resource.data.get('patientCode', null) ||
+         (resource.data.get('patientCode', null) == null &&
+          data.patientCode is string &&
+          getAfter(/databases/$(database)/documents/patientCodes/$(data.patientCode)).data.patientId == request.auth.uid));
+    }
+
+    function validCaregiverMedicationTimeUpdate(userId) {
+      let data = request.resource.data;
+      return caregiverFor(userId) && resource.data.role == 'patient' &&
+        changedOnly([
+          'medicationHour', 'medicationMinute', 'medicationTimeUpdatedBy',
+          'medicationTimeUpdatedAt', 'updatedAt'
+        ]) &&
+        data.medicationHour is int && data.medicationHour >= 0 &&
+        data.medicationHour <= 23 &&
+        data.medicationMinute is int && data.medicationMinute >= 0 &&
+        data.medicationMinute <= 59 &&
+        data.medicationTimeUpdatedBy == request.auth.uid &&
+        data.medicationTimeUpdatedAt == request.time &&
+        data.updatedAt == request.time;
+    }
+    function validSnoozeCountChange() {
+      return !changed('snoozeCount') ||
+        (request.resource.data.snoozeCount is int &&
+          ((resource.data.get('snoozeCount', null) == null &&
+              request.resource.data.snoozeCount == 1) ||
+           (resource.data.get('snoozeCount', null) is int &&
+              request.resource.data.snoozeCount ==
+                resource.data.snoozeCount + 1)));
+    }
+    function validPendingAlarmUpdate() {
+      let data = request.resource.data;
+      return resource.data.status == 'pending' && data.status == 'pending' &&
+        changedOnly([
+          'reminderTriggeredAt', 'deviceTriggeredAt', 'dueNotifiedAt',
+          'lateNotifiedAt',
+          'snoozedUntil', 'lastSnoozedAt', 'snoozeCount', 'dismissedAt',
+          'responseAction', 'alarmState', 'updatedAt'
+        ]) &&
+        changed('updatedAt') && data.updatedAt == request.time &&
+        changedOnceToRequestTime('reminderTriggeredAt') &&
+        changedOnceToRequestTime('deviceTriggeredAt') &&
+        changedOnceToRequestTime('dueNotifiedAt') &&
+        changedOnceToRequestTime('lateNotifiedAt') &&
+        ((changed('deviceTriggeredAt') &&
+            data.deviceTriggeredAt == request.time &&
+            request.time >= resource.data.scheduledAt -
+              duration.value(1, 'm') &&
+            data.alarmState == 'ringing' &&
+            !changed('reminderTriggeredAt') && !changed('dueNotifiedAt') &&
+            !changed('snoozedUntil') && !changed('lastSnoozedAt') &&
+            !changed('snoozeCount') && !changed('dismissedAt') &&
+            !changed('responseAction') && !changed('lateNotifiedAt')) ||
+         (changed('snoozedUntil') && data.snoozedUntil is timestamp &&
+            data.snoozedUntil <= request.time + duration.value(15, 'm') &&
+            changed('lastSnoozedAt') && data.lastSnoozedAt == request.time &&
+            validSnoozeCountChange() && data.responseAction == 'snoozed' &&
+            data.alarmState == 'snoozed' && !changed('dismissedAt') &&
+            !changed('reminderTriggeredAt') &&
+            !changed('deviceTriggeredAt') && !changed('dueNotifiedAt') &&
+            !changed('lateNotifiedAt')) ||
+         (changed('dismissedAt') && data.dismissedAt == request.time &&
+            data.responseAction == 'dismissed' &&
+            data.alarmState == 'dismissed' &&
+            !changed('snoozedUntil') && !changed('lastSnoozedAt') &&
+            !changed('snoozeCount') &&
+            !changed('reminderTriggeredAt') &&
+            !changed('deviceTriggeredAt') && !changed('dueNotifiedAt') &&
+            !changed('lateNotifiedAt')));
+    }
+    function validTerminalMedicineUpdate() {
+      let data = request.resource.data;
+      let terminalFields = [
+        'status', 'takenAt', 'respondedAt', 'updatedAt', 'missedAt',
+        'reminderTriggeredAt', 'snoozedUntil', 'lastSnoozedAt',
+        'snoozeCount', 'dismissedAt', 'responseAction', 'alarmState'
+      ];
+      return resource.data.status == 'pending' &&
+        data.status in ['taken', 'late', 'missed'] &&
+        changedOnly(terminalFields) &&
+        changed('status') && changed('respondedAt') && changed('updatedAt') &&
+        data.respondedAt == request.time && data.updatedAt == request.time &&
+        ((data.status in ['taken', 'late'] &&
+            changed('takenAt') && data.takenAt == request.time &&
+            data.get('missedAt', null) == null &&
+            data.responseAction == 'taken' &&
+            data.alarmState == 'stopped') ||
+         (data.status == 'missed' &&
+            request.time >= resource.data.scheduledAt &&
+            changed('missedAt') && data.missedAt == request.time &&
+            data.get('takenAt', null) == null &&
+            data.responseAction == 'missed' &&
+            data.alarmState == 'stopped')) &&
+        data.get('snoozedUntil', null) == null &&
+        changedToRequestTimeOrNull('reminderTriggeredAt') &&
+        changedToRequestTimeOrNull('lastSnoozedAt') &&
+        changedToRequestTimeOrNull('dismissedAt') &&
+        (!changed('snoozeCount') ||
+          (data.snoozeCount is int && data.snoozeCount >= 0)) &&
+        data.get('responseAction', null) in ['taken', 'missed'] &&
+        data.alarmState == 'stopped';
+    }
+    function validAutomaticMissedRecovery(medicineId) {
+      let data = request.resource.data;
+      let log = getAfter(
+        /databases/$(database)/documents/medicationLogs/$(medicineId)
+      ).data;
+      return resource.data.status == 'missed' &&
+        resource.data.get('responseAction', null) == 'automatic_missed' &&
+        resource.data.get('missedAt', null) is timestamp &&
+        resource.data.scheduledAt is timestamp &&
+        request.time >= resource.data.scheduledAt + duration.value(18, 'h') &&
+        request.time <= resource.data.scheduledAt + duration.value(24, 'h') &&
+        data.status == 'late' &&
+        changedOnly([
+          'status', 'takenAt', 'missedAt', 'respondedAt', 'responseAction',
+          'alarmState', 'updatedAt'
+        ]) &&
+        changed('status') && changed('takenAt') && changed('missedAt') &&
+        changed('respondedAt') && changed('responseAction') &&
+        changed('alarmState') && changed('updatedAt') &&
+        data.takenAt == request.time && data.respondedAt == request.time &&
+        data.updatedAt == request.time &&
+        data.get('missedAt', null) == null &&
+        data.responseAction == 'taken' && data.alarmState == 'stopped' &&
+        log.medicineId == medicineId &&
+        log.patientId == request.auth.uid &&
+        log.patientId == data.patientId &&
+        log.name == data.name &&
+        medicationDosageMatches(log.dosage, data) &&
+        log.scheduledAt == data.scheduledAt &&
+        log.status == 'late' && log.responseAction == 'taken' &&
+        log.takenAt == request.time && log.respondedAt == request.time &&
+        log.get('missedAt', null) == null;
+    }
+    function medicineAfter(medicineId) {
+      return getAfter(
+        /databases/$(database)/documents/medicines/$(medicineId)
+      ).data;
+    }
+    function validTerminalMedicationLog(logId) {
+      let data = request.resource.data;
+      let medicine = medicineAfter(logId);
+      return data.keys().hasAll([
+          'medicineId', 'patientId', 'name', 'dosage', 'scheduledAt',
+          'status', 'respondedAt', 'recordedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'medicineId', 'patientId', 'caregiverId', 'name', 'dosage',
+          'scheduledAt', 'status', 'takenAt', 'missedAt', 'respondedAt',
+          'recordedAt', 'responseAction', 'dismissedAt', 'snoozeCount',
+          'scheduleRevision'
+        ]) &&
+        data.medicineId == logId && data.patientId == request.auth.uid &&
+        medicine.patientId == request.auth.uid && medicine.status == data.status &&
+        data.status in ['taken', 'late', 'missed'] &&
+        data.name == medicine.name &&
+        medicationDosageMatches(data.dosage, medicine) &&
+        data.scheduledAt == medicine.get('scheduledAt', null) &&
+        data.respondedAt == request.time && data.recordedAt == request.time &&
+        ((data.status in ['taken', 'late'] &&
+            data.takenAt == request.time &&
+            medicine.takenAt == request.time &&
+            data.get('missedAt', null) == null) ||
+         (data.status == 'missed' &&
+            data.missedAt == request.time &&
+            medicine.missedAt == request.time &&
+            data.get('takenAt', null) == null)) &&
+        (data.get('caregiverId', null) == null ||
+          data.caregiverId == medicine.get('caregiverId', null)) &&
+        (data.get('scheduleRevision', null) == null ||
+          data.scheduleRevision == medicine.get('scheduleRevision', null)) &&
+        data.responseAction == medicine.responseAction;
+    }
+    function validAutomaticMissedLogRecovery(logId) {
+      let data = request.resource.data;
+      let medicineBefore = get(
+        /databases/$(database)/documents/medicines/$(logId)
+      ).data;
+      let medicine = medicineAfter(logId);
+      return resource.data.medicineId == logId &&
+        resource.data.patientId == request.auth.uid &&
+        resource.data.status == 'missed' &&
+        resource.data.get('responseAction', null) == 'automatic_missed' &&
+        resource.data.get('missedAt', null) is timestamp &&
+        medicineBefore.patientId == request.auth.uid &&
+        medicineBefore.status == 'missed' &&
+        medicineBefore.get('responseAction', null) == 'automatic_missed' &&
+        medicineBefore.scheduledAt is timestamp &&
+        request.time >= medicineBefore.scheduledAt + duration.value(18, 'h') &&
+        request.time <= medicineBefore.scheduledAt + duration.value(24, 'h') &&
+        changedOnly([
+          'status', 'takenAt', 'missedAt', 'respondedAt', 'responseAction'
+        ]) &&
+        changed('status') && changed('takenAt') && changed('missedAt') &&
+        changed('respondedAt') && changed('responseAction') &&
+        data.status == 'late' && data.responseAction == 'taken' &&
+        data.takenAt == request.time && data.respondedAt == request.time &&
+        data.get('missedAt', null) == null &&
+        medicine.status == 'late' && medicine.responseAction == 'taken' &&
+        medicine.takenAt == request.time &&
+        medicine.respondedAt == request.time &&
+        medicine.get('missedAt', null) == null &&
+        data.patientId == medicine.patientId &&
+        data.name == medicine.name &&
+        medicationDosageMatches(data.dosage, medicine) &&
+        data.scheduledAt == medicine.scheduledAt;
+    }
+    function validPatientNotificationCreate(notificationId) {
+      let data = request.resource.data;
+      let medicine = medicineAfter(data.medicineId);
+      return data.keys().hasAll([
+          'recipientId', 'patientId', 'medicineId', 'type', 'title',
+          'message', 'read', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'recipientId', 'patientId', 'medicineId', 'type', 'title',
+          'message', 'read', 'createdAt'
+        ]) &&
+        data.patientId == request.auth.uid && data.recipientId is string &&
+        connected(data.recipientId, request.auth.uid) &&
+        data.medicineId is string && medicine.patientId == request.auth.uid &&
+        notificationId == data.medicineId + '_' + data.type + '_' +
+          data.recipientId &&
+        data.type in [
+          'due', 'triggered', 'reminder_triggered', 'taken', 'taken_late',
+          'late', 'missed'
+        ] &&
+        ((data.type in ['due', 'triggered', 'reminder_triggered'] &&
+            medicine.status == 'pending') ||
+         (data.type == 'late' && medicine.status in ['pending', 'late']) ||
+         (data.type == 'taken_late' && medicine.status == 'late') ||
+         (data.type in ['taken', 'missed'] && medicine.status == data.type)) &&
+        data.title is string && data.message is string &&
+        data.read == false && data.createdAt == request.time;
+    }
+    function validCaregiverNotificationCreate(notificationId) {
+      let data = request.resource.data;
+      let reminder = getAfter(
+        /databases/$(database)/documents/reminders/$(notificationId)
+      ).data;
+      return data.keys().hasAll([
+          'recipientId', 'patientId', 'type', 'title', 'message', 'read',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'recipientId', 'patientId', 'type', 'title', 'message', 'read',
+          'createdAt'
+        ]) &&
+        data.recipientId == data.patientId && data.type == 'caregiver_reminder' &&
+        caregiverFor(data.patientId) && data.title is string &&
+        data.message is string && data.read == false &&
+        data.createdAt == request.time &&
+        reminder.caregiverId == request.auth.uid &&
+        reminder.patientId == data.patientId;
+    }
+    function validPatientNotificationRefresh() {
+      let data = request.resource.data;
+      return resource.data.patientId == request.auth.uid &&
+        resource.data.read == false && data.read == false &&
+        connected(resource.data.recipientId, request.auth.uid) &&
+        changedOnly(['title', 'message', 'createdAt']) &&
+        data.title is string && data.message is string &&
+        data.createdAt == request.time;
+    }
+
+    function validInitialTreatmentMonitoring(patientId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'patientId', 'treatmentStartDate', 'expectedCompletionDate',
+          'status', 'confirmedFailureType', 'conversionDetected',
+          'possibleReversal', 'confirmedReversal', 'confirmedFailure',
+          'treatmentOutcome', 'reasoningPath', 'classificationReason',
+          'lastClassificationUpdate', 'createdAt', 'updatedAt'
+        ]) &&
+        data.patientId == patientId &&
+        data.treatmentStartDate is timestamp &&
+        data.expectedCompletionDate is timestamp &&
+        data.expectedCompletionDate > data.treatmentStartDate &&
+        data.get('actualCompletionDate', null) == null &&
+        data.status == 'ongoing' &&
+        data.confirmedFailureType == 'none' &&
+        data.get('failureNotes', '') == '' &&
+        data.conversionDetected == false &&
+        data.possibleReversal == false &&
+        data.confirmedReversal == false &&
+        data.confirmedFailure == false &&
+        data.treatmentOutcome == 'TREATMENT IN PROGRESS' &&
+        data.reasoningPath is list &&
+        data.classificationReason is string &&
+        data.lastClassificationUpdate == request.time &&
+        data.createdAt == request.time && data.updatedAt == request.time;
+    }
+
+    function validCaregiverTreatmentUpdate(patientId) {
+      let data = request.resource.data;
+      return caregiverFor(patientId) &&
+        resource.data.patientId == patientId && data.patientId == patientId &&
+        changedOnly([
+          'status', 'actualCompletionDate', 'confirmedFailureType',
+          'failureNotes', 'updatedByCaregiver', 'updatedAt'
+        ]) &&
+        data.status in ['ongoing', 'completed'] &&
+        (data.get('actualCompletionDate', null) == null ||
+          data.actualCompletionDate is timestamp) &&
+        data.confirmedFailureType in [
+          'none', 'persistent_bacteriological_failure',
+          'regimen_permanently_changed',
+          'treatment_permanently_discontinued',
+          'additional_drug_resistance'
+        ] &&
+        data.failureNotes is string && data.failureNotes.size() <= 1000 &&
+        data.updatedByCaregiver == request.auth.uid &&
+        data.updatedAt == request.time;
+    }
+
+    function validGeneratedBtaSchedule(patientId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'patientId', 'examinationType', 'scheduledDate', 'result',
+          'notes', 'enteredByCaregiver', 'systemGenerated', 'createdAt',
+          'updatedAt'
+        ]) &&
+        data.patientId == patientId &&
+        data.examinationType in ['initial', 'month_2', 'pre_final', 'final'] &&
+        data.scheduledDate is timestamp &&
+        data.get('examinationDate', null) == null && data.result == null &&
+        data.notes == '' && data.enteredByCaregiver == null &&
+        data.systemGenerated == true &&
+        data.createdAt == request.time && data.updatedAt == request.time;
+    }
+
+    function validCaregiverBtaWrite(patientId, existingPatientId) {
+      let data = request.resource.data;
+      return caregiverFor(patientId) && patientId == existingPatientId &&
+        data.patientId == patientId &&
+        data.examinationType in [
+          'initial', 'month_2', 'pre_final', 'final', 'confirmation'
+        ] &&
+        data.scheduledDate is timestamp &&
+        data.result in ['positive', 'negative'] &&
+        data.examinationDate is timestamp &&
+        data.notes is string && data.notes.size() <= 1000 &&
+        data.enteredByCaregiver == request.auth.uid &&
+        data.updatedAt == request.time;
+    }
+
+    function validLegacyMonth3Migration() {
+      return signedIn() &&
+        (ownUser(resource.data.patientId) || caregiverFor(resource.data.patientId)) &&
+        resource.data.examinationType == 'month2' &&
+        request.resource.data.examinationType == 'month_2' &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'examinationType', 'updatedAt'
+        ]);
+    }
+
+    function validOwnerGeneratedBtaScheduleRepair() {
+      return role('patient') && ownUser(resource.data.patientId) &&
+        resource.data.systemGenerated == true && resource.data.result == null &&
+        request.resource.data.patientId == resource.data.patientId &&
+        (request.resource.data.examinationType == resource.data.examinationType ||
+          (resource.data.examinationType == 'month2' &&
+            request.resource.data.examinationType == 'month_2')) &&
+        request.resource.data.systemGenerated == true &&
+        request.resource.data.result == null &&
+        request.resource.data.scheduledDate is timestamp &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'examinationType', 'scheduledDate', 'updatedAt'
+        ]);
+    }
+
+    match /users/{userId} {
+      allow create: if ownUser(userId) &&
+        request.resource.data.role in ['patient', 'caregiver'] &&
+        validNewUser();
+      allow read: if ownUser(userId) ||
+        caregiverFor(userId) ||
+        (role('patient') && connected(userId, request.auth.uid));
+      allow update: if (ownUser(userId) && validOwnUserUpdate()) ||
+        validCaregiverMedicationTimeUpdate(userId);
+      allow delete: if false;
+    }
+
+    // An unguessable code provides a narrow lookup without exposing patient lists.
+    match /patientCodes/{code} {
+      // Registration transactions must check collisions before the user profile
+      // exists; document listing remains forbidden.
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() &&
+        request.resource.data.patientId == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'patient' &&
+        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.patientCode == code;
+      allow update, delete: if false;
+    }
+
+    match /pairings/{pairingId} {
+      allow read: if signedIn() &&
+        (resource.data.caregiverId == request.auth.uid ||
+         resource.data.patientId == request.auth.uid);
+      allow create: if role('caregiver') &&
+        request.resource.data.caregiverId == request.auth.uid &&
+        pairingId == request.auth.uid + '_' + request.resource.data.patientId &&
+        exists(/databases/$(database)/documents/patientCodes/$(request.resource.data.invitationCode)) &&
+        get(/databases/$(database)/documents/patientCodes/$(request.resource.data.invitationCode)).data.patientId == request.resource.data.patientId;
+      allow delete: if signedIn() &&
+        (resource.data.caregiverId == request.auth.uid ||
+         resource.data.patientId == request.auth.uid);
+      allow update: if false;
+    }
+
+    match /medicines/{medicineId} {
+      allow read: if signedIn() &&
+        (resource.data.patientId == request.auth.uid || caregiverFor(resource.data.patientId));
+      allow create: if role('caregiver') &&
+        request.resource.data.caregiverId == request.auth.uid &&
+        caregiverFor(request.resource.data.patientId) &&
+        validNewPendingMedicine();
+      allow update: if
+        (role('patient') && resource.data.patientId == request.auth.uid &&
+          (validTerminalMedicineUpdate() || validPendingAlarmUpdate() ||
+            validAutomaticMissedRecovery(medicineId))) ||
+        (caregiverFor(resource.data.patientId) &&
+          validCaregiverMedicineUpdate());
+      allow delete: if caregiverFor(resource.data.patientId) &&
+        resource.data.status == 'pending' &&
+        resource.data.get('systemGenerated', false) == false;
+    }
+
+    match /medicationLogs/{logId} {
+      allow read: if signedIn() &&
+        (resource.data.patientId == request.auth.uid || caregiverFor(resource.data.patientId));
+      allow create: if role('patient') && validTerminalMedicationLog(logId);
+      allow update: if role('patient') &&
+        validAutomaticMissedLogRecovery(logId);
+      allow delete: if false;
+    }
+
+    match /treatments/{patientId} {
+      allow read: if ownUser(patientId) || caregiverFor(patientId);
+      allow create: if
+        (ownUser(patientId) || caregiverFor(patientId)) &&
+        validInitialTreatmentMonitoring(patientId);
+      allow update: if validCaregiverTreatmentUpdate(patientId);
+      allow delete: if false;
+    }
+
+    match /btaExaminations/{examinationId} {
+      allow read: if signedIn() &&
+        (resource.data.patientId == request.auth.uid ||
+          caregiverFor(resource.data.patientId));
+      allow create: if
+        ((role('patient') && request.resource.data.patientId == request.auth.uid &&
+            validGeneratedBtaSchedule(request.auth.uid)) ||
+          (role('caregiver') &&
+            caregiverFor(request.resource.data.patientId) &&
+            validGeneratedBtaSchedule(request.resource.data.patientId)));
+      allow update: if validLegacyMonth3Migration() ||
+        validOwnerGeneratedBtaScheduleRepair() ||
+        (role('caregiver') &&
+          validCaregiverBtaWrite(
+            request.resource.data.patientId,
+            resource.data.patientId
+          ) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'examinationDate', 'result', 'notes', 'enteredByCaregiver', 'updatedAt'
+          ]));
+      allow delete: if false;
+    }
+
+    match /reminders/{reminderId} {
+      allow create: if role('caregiver') &&
+        request.resource.data.caregiverId == request.auth.uid &&
+        caregiverFor(request.resource.data.patientId);
+      allow read: if signedIn() &&
+        (resource.data.caregiverId == request.auth.uid ||
+         resource.data.patientId == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if role('caregiver') &&
+        validCaregiverNotificationCreate(notificationId);
+      allow update: if signedIn() &&
+        (resource.data.recipientId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['read', 'readAt']) &&
+          request.resource.data.read == true &&
+          request.resource.data.readAt == request.time);
+      allow delete: if false;
+    }
+  }
+}

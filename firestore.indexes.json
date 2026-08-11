@@ -1,0 +1,37 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "medicines",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "scheduledAt", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "pushOutbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "nextAttemptAt", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "pushOutbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "leaseUntil", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "btaExaminations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "result", "order": "ASCENDING"},
+        {"fieldPath": "scheduledDate", "order": "ASCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
