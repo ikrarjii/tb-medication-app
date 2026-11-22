@@ -1,11 +1,12 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
-
 import 'firebase_options.dart';
+import 'firebase_environment.dart';
 import 'screens/caregiver_home_screen.dart';
 import 'screens/patient_home_screen.dart';
 import 'services/auth_service.dart';
@@ -17,11 +18,34 @@ import 'wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
+  final options = DefaultFirebaseOptions.currentPlatform;
+  await Firebase.initializeApp(
+    options: FirebaseEnvironment.useEmulator
+        ? const FirebaseOptions(
+            apiKey: 'demo-api-key',
+            appId: '1:000000000000:android:demo',
+            messagingSenderId: '000000000000',
+            projectId: FirebaseEnvironment.demoProjectId,
+          )
+        : options,
   );
+  FirebaseFirestore.instance.settings = Settings(
+    persistenceEnabled: !FirebaseEnvironment.useEmulator,
+  );
+  if (FirebaseEnvironment.useEmulator) {
+    await FirebaseAuth.instance.useAuthEmulator(
+      FirebaseEnvironment.emulatorHost,
+      FirebaseEnvironment.authPort,
+      automaticHostMapping: FirebaseEnvironment.useAutomaticHostMapping,
+    );
+    FirebaseFirestore.instance.useFirestoreEmulator(
+      FirebaseEnvironment.emulatorHost,
+      FirebaseEnvironment.firestorePort,
+      automaticHostMapping: FirebaseEnvironment.useAutomaticHostMapping,
+    );
+  } else {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  }
   await ReminderService.instance.initialize();
   runApp(const MedicineControlApp());
 }

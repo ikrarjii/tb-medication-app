@@ -111,9 +111,9 @@ class RoleSelectionScreen extends StatelessWidget {
                     const SizedBox(height: 16),
                     _RoleCard(
                       icon: Icons.volunteer_activism_rounded,
-                      title: 'Pendamping',
+                      title: 'Pengawas',
                       description:
-                          'Pantau kondisi dan kepatuhan obat pasien terhubung.',
+                          'Pantau jadwal dan kepatuhan minum obat pasien terhubung.',
                       color: colors.tertiary,
                       onTap: () => _selectRole(context, UserRole.caregiver),
                     ),

@@ -82,7 +82,7 @@ class _CaregiverPatientsPage extends StatelessWidget {
           return AsyncErrorView(error: profileSnapshot.error);
         }
         if (!profileSnapshot.hasData) {
-          return const AppLoadingView(message: 'Memuat profil pendamping…');
+          return const AppLoadingView(message: 'Memuat profil pengawas...');
         }
         return StreamBuilder<List<PatientPairing>>(
           stream: repository.linkedPatients(caregiverId),
@@ -546,7 +546,7 @@ class PatientDetailScreen extends StatelessWidget {
             title: Text(profile.fullName),
             actions: [
               IconButton(
-                tooltip: 'Atur waktu obat',
+                tooltip: 'Atur jadwal minum obat',
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute<void>(
@@ -1065,11 +1065,9 @@ String _effectiveStatus(Medicine medicine) {
 
 String _firstName(String name) =>
     name.trim().isEmpty ? 'Sobat' : name.trim().split(RegExp(r'\s+')).first;
-String _time(BuildContext context, DateTime? date) => date == null
+String _time(BuildContext _, DateTime? date) => date == null
     ? 'Belum tercatat'
-    : MaterialLocalizations.of(
-        context,
-      ).formatTimeOfDay(TimeOfDay.fromDateTime(date));
+    : formatMedicationTime(date.hour, date.minute);
 String _date(BuildContext context, DateTime? date) => date == null
     ? 'Tanggal belum tercatat'
     : MaterialLocalizations.of(context).formatMediumDate(date);

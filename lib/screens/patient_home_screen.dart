@@ -264,10 +264,13 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         ).showSnackBar(SnackBar(content: Text(message)));
       }
       return true;
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('Gagal menyimpan respons alarm: $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Respons belum tersimpan: $error')),
+          const SnackBar(
+            content: Text('Respons belum tersimpan. Silakan coba kembali.'),
+          ),
         );
       }
       return false;
@@ -555,7 +558,7 @@ class _PatientHomePageState extends State<_PatientHomePage> {
                     title: 'Tidak ada jadwal hari ini',
                     message:
                         'Hari ini bukan hari minum obat. Jika seharusnya ada '
-                        'jadwal, minta pendamping memeriksa waktu obat.',
+                        'jadwal, minta pengawas memeriksa waktu obat.',
                   )
                 else
                   ...today.map(
@@ -581,7 +584,7 @@ class _PatientHomePageState extends State<_PatientHomePage> {
                     icon: Icons.event_busy_outlined,
                     title: 'Jadwal berikutnya belum tersedia',
                     message: profile.treatmentGroup == TreatmentPlan.group1
-                        ? 'Belum ada jadwal berikutnya. Pastikan PMO sudah mengatur waktu minum obat.'
+                        ? 'Belum ada jadwal berikutnya. Pastikan pengawas sudah mengatur jam minum obat.'
                         : 'Golongan ini belum memiliki aturan jadwal otomatis.',
                   )
                 else
@@ -1014,11 +1017,11 @@ class _PatientTreatmentSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final age = profile.ageAt(DateTime.now());
     final medicationTime = profile.hasMedicationTime
-        ? TimeOfDay(
-            hour: profile.medicationHour!,
-            minute: profile.medicationMinute!,
-          ).format(context)
-        : 'Belum diatur PMO';
+        ? formatMedicationTime(
+            profile.medicationHour!,
+            profile.medicationMinute!,
+          )
+        : 'Belum diatur pengawas';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1160,7 +1163,7 @@ class _MedicationTimingNotice extends StatelessWidget {
             child: Text(
               'Tepat waktu sampai ${medicationLateGracePeriod.inMinutes} menit setelah jadwal. '
               'Jika belum dikonfirmasi pada menit ke-${medicationLateGracePeriod.inMinutes}, '
-              'pendamping menerima notifikasi; setelah batas itu status menjadi terlambat. '
+              'pengawas menerima notifikasi; setelah batas itu status menjadi terlambat. '
               'Jika belum dikonfirmasi selama ${medicationMissedAfter.inHours} jam, '
               'status menjadi terlewat.',
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -1333,10 +1336,13 @@ class _MedicationScheduleCardState extends State<_MedicationScheduleCard> {
           ),
         );
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('Gagal menyimpan status dosis: $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Catatan belum tersimpan: $error')),
+          const SnackBar(
+            content: Text('Catatan belum tersimpan. Silakan coba kembali.'),
+          ),
         );
       }
     } finally {
@@ -1528,10 +1534,13 @@ class _MedicationHistoryPageState extends State<_MedicationHistoryPage> {
           ),
         );
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('Gagal memulihkan dosis terlewat: $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Catatan belum tersimpan: $error')),
+          const SnackBar(
+            content: Text('Catatan belum tersimpan. Silakan coba kembali.'),
+          ),
         );
       }
     } finally {
@@ -1686,11 +1695,9 @@ bool _sameDay(DateTime? a, DateTime? b) =>
     a.year == b.year &&
     a.month == b.month &&
     a.day == b.day;
-String _time(BuildContext context, DateTime? date) => date == null
+String _time(BuildContext _, DateTime? date) => date == null
     ? 'Belum tercatat'
-    : MaterialLocalizations.of(
-        context,
-      ).formatTimeOfDay(TimeOfDay.fromDateTime(date));
+    : formatMedicationTime(date.hour, date.minute);
 String _dateText(BuildContext context, DateTime? date) => date == null
     ? 'Tanggal belum tercatat'
     : MaterialLocalizations.of(context).formatMediumDate(date);

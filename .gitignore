@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local-only demo login credentials
+.demo_accounts.local.json
+.demo_production_credentials.local.json

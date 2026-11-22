@@ -101,6 +101,12 @@ void main() {
     );
   });
 
+  test('jam minum obat selalu ditampilkan dalam format 24 jam Indonesia', () {
+    expect(formatMedicationTime(8, 0), '08.00');
+    expect(formatMedicationTime(17, 5), '17.05');
+    expect(() => formatMedicationTime(24, 0), throwsArgumentError);
+  });
+
   test('batas terlewat otomatis adalah 18 jam dari jadwal', () {
     final scheduledAt = DateTime(2026, 7, 22, 8);
 

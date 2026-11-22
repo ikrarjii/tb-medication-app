@@ -7,6 +7,7 @@ import 'screens/caregiver_home_screen.dart';
 import 'screens/patient_home_screen.dart';
 import 'screens/role_selection_screen.dart';
 import 'screens/splash_screen.dart';
+import 'firebase_environment.dart';
 import 'services/auth_service.dart';
 import 'services/push_notification_service.dart';
 import 'services/reminder_service.dart';
@@ -45,7 +46,9 @@ class _AuthenticatedHomeState extends State<_AuthenticatedHome> {
   void initState() {
     super.initState();
     unawaited(_configureNativePatient());
-    PushNotificationService.instance.startForUser(widget.userId);
+    if (!FirebaseEnvironment.useEmulator) {
+      PushNotificationService.instance.startForUser(widget.userId);
+    }
   }
 
   @override
@@ -53,7 +56,9 @@ class _AuthenticatedHomeState extends State<_AuthenticatedHome> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.userId != widget.userId || oldWidget.role != widget.role) {
       unawaited(_configureNativePatient());
+      if (!FirebaseEnvironment.useEmulator) {
       PushNotificationService.instance.startForUser(widget.userId);
+    }
     }
   }
 

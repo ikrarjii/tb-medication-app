@@ -49,7 +49,7 @@ class AccountProfilePage extends StatelessWidget {
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
             ),
             Text(
-              isPatient ? 'Pasien' : (profile.relationship ?? 'Pendamping'),
+              isPatient ? 'Pasien' : (profile.relationship ?? 'Pengawas'),
               textAlign: TextAlign.center,
               style: TextStyle(color: Theme.of(context).colorScheme.primary),
             ),

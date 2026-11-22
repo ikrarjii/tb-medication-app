@@ -7,10 +7,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../firebase_options.dart';
+import '../firebase_environment.dart';
 import 'reminder_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (FirebaseEnvironment.useEmulator) return;
   if (Firebase.apps.isEmpty) {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -34,6 +36,7 @@ class PushNotificationService {
   StreamSubscription<RemoteMessage>? _openedSubscription;
 
   void startForUser(String userId) {
+    if (FirebaseEnvironment.useEmulator) return;
     // Firebase in this project is currently configured for Android only.
     // Calling firebase_messaging on Windows/Linux produces a
     // MissingPluginException because those hosts do not register the plugin.

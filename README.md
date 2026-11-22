@@ -107,6 +107,20 @@ pasien, notifikasi lokal pasien, dan inbox event konfirmasi tetap berfungsi.
 Push saat aplikasi tertutup serta event otomatis jadwal tiba/terlambat memerlukan
 Functions yang sudah dideploy.
 
+### Emulator lokal untuk notifikasi
+
+Jalankan seluruh emulator yang diperlukan dengan proyek demo. Pub/Sub wajib
+disertakan agar fungsi jadwal seperti `checkMedicationDeadlines` aktif:
+
+```powershell
+firebase emulators:start --config firebase.demo.json --project demo-tb-monitoring --only auth,firestore,functions,pubsub
+```
+
+Kemudian jalankan aplikasi Flutter dalam mode debug dengan
+`--dart-define=USE_FIREBASE_EMULATOR=true`. Untuk Android Emulator, host
+Firestore/Auth pada aplikasi diarahkan ke `10.0.2.2`; Functions berjalan di
+server emulator dan menggunakan Firestore emulator dari proyek demo yang sama.
+
 `checkBtaExaminationReminders` berjalan setiap hari pukul 08.00 WITA. Pasien
 menerima pengingat ketika rentang bulan pemeriksaan dimulai. Pendamping menerima
 pemberitahuan rentang yang sama dan peringatan jika hasil belum diisi setelah

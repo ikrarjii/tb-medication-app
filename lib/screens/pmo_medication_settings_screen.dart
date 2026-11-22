@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/medication_timing.dart';
 import '../models/treatment_plan.dart';
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
@@ -21,13 +22,15 @@ class PmoMedicationSettingsScreen extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Pengaturan waktu obat')),
+            appBar: AppBar(title: const Text('Pengaturan Jadwal Minum Obat')),
             body: AsyncErrorView(error: snapshot.error),
           );
         }
         if (!snapshot.hasData) {
           return const Scaffold(
-            body: AppLoadingView(message: 'Memuat pengaturan waktu obat…'),
+            body: AppLoadingView(
+              message: 'Memuat pengaturan jadwal minum obat...',
+            ),
           );
         }
         return _MedicationTimeForm(profile: snapshot.data!);
@@ -46,16 +49,18 @@ class _MedicationTimeForm extends StatefulWidget {
 }
 
 class _MedicationTimeFormState extends State<_MedicationTimeForm> {
-  late TimeOfDay _time;
+  TimeOfDay? _time;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _time = TimeOfDay(
-      hour: widget.profile.medicationHour ?? 7,
-      minute: widget.profile.medicationMinute ?? 0,
-    );
+    if (widget.profile.hasMedicationTime) {
+      _time = TimeOfDay(
+        hour: widget.profile.medicationHour!,
+        minute: widget.profile.medicationMinute!,
+      );
+    }
   }
 
   @override
@@ -78,7 +83,7 @@ class _MedicationTimeFormState extends State<_MedicationTimeForm> {
     final hasTreatmentRules =
         widget.profile.treatmentGroup == TreatmentPlan.group1;
     return Scaffold(
-      appBar: AppBar(title: const Text('Pengaturan waktu obat')),
+      appBar: AppBar(title: const Text('Pengaturan Jadwal Minum Obat')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -126,7 +131,7 @@ class _MedicationTimeFormState extends State<_MedicationTimeForm> {
                     ),
                   const Divider(),
                   const Text(
-                    'Kelompok terapi dan hari pengobatan ditetapkan otomatis dan tidak dapat diubah oleh PMO.',
+                    'Kelompok terapi dan hari pengobatan ditetapkan otomatis dan tidak dapat diubah oleh pengawas.',
                   ),
                 ],
               ),
@@ -137,15 +142,32 @@ class _MedicationTimeFormState extends State<_MedicationTimeForm> {
             child: ListTile(
               contentPadding: const EdgeInsets.all(18),
               leading: const Icon(Icons.access_time_filled_rounded, size: 32),
-              title: const Text('Waktu minum obat'),
+              title: const Text('Jam minum obat'),
               subtitle: Text(
-                _time.format(context),
+                _time == null
+                    ? 'Belum dipilih'
+                    : formatMedicationTime(_time!.hour, _time!.minute),
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),
               ),
               trailing: const Icon(Icons.edit_rounded),
               onTap: _saving || !hasTreatmentRules ? null : _chooseTime,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(18),
+              leading: const Icon(Icons.event_available_rounded, size: 30),
+              title: const Text('Tanggal mulai terapi'),
+              subtitle: Text(
+                widget.profile.treatmentStartedAt == null
+                    ? 'Belum diisi'
+                    : MaterialLocalizations.of(
+                        context,
+                      ).formatMediumDate(widget.profile.treatmentStartedAt!),
+              ),
             ),
           ),
           const SizedBox(height: 18),
@@ -157,7 +179,7 @@ class _MedicationTimeFormState extends State<_MedicationTimeForm> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.save_rounded),
-            label: Text(_saving ? 'Membuat jadwal…' : 'Simpan waktu obat'),
+            label: Text(_saving ? 'Menyimpan...' : 'Simpan Jadwal'),
           ),
         ],
       ),
@@ -165,34 +187,58 @@ class _MedicationTimeFormState extends State<_MedicationTimeForm> {
   }
 
   Future<void> _chooseTime() async {
-    final selected = await showTimePicker(context: context, initialTime: _time);
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: _time ?? const TimeOfDay(hour: 7, minute: 0),
+    );
     if (selected != null && mounted) setState(() => _time = selected);
   }
 
   Future<void> _save() async {
+    if (_saving) return;
+    final time = _time;
+    if (time == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Jam minum obat wajib dipilih.')),
+      );
+      return;
+    }
+    if (widget.profile.id.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pasien wajib dipilih.')));
+      return;
+    }
+    if (widget.profile.treatmentStartedAt == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tanggal mulai terapi wajib diisi.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       await context.read<MedicineRepository>().configureMedicationTime(
         caregiverId: context.read<AuthService>().user!.uid,
         patientId: widget.profile.id,
-        hour: _time.hour,
-        minute: _time.minute,
+        hour: time.hour,
+        minute: time.minute,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Waktu tersimpan dan jadwal terapi telah diperbarui.'),
-        ),
+        const SnackBar(content: Text('Jadwal berhasil disimpan.')),
       );
-    } on StateError catch (error) {
+    } on MedicationScheduleFailure catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error.message)));
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('Gagal menyimpan jadwal obat: $error\n$stackTrace');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gagal menyimpan waktu obat.')),
+        const SnackBar(
+          content: Text('Jadwal gagal disimpan. Silakan coba kembali.'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _saving = false);

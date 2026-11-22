@@ -16,7 +16,7 @@ enum UserRole {
 
   String get label => switch (this) {
     UserRole.patient => 'Pasien',
-    UserRole.caregiver => 'Pendamping',
+    UserRole.caregiver => 'Pengawas',
   };
 }
 
@@ -386,7 +386,7 @@ class AuthService extends ChangeNotifier {
       'too-many-requests' => 'Terlalu banyak percobaan. Coba lagi nanti.',
       'network-request-failed' =>
         'Tidak ada koneksi internet. Periksa jaringan lalu coba lagi.',
-      _ => error.message ?? 'Autentikasi gagal. Silakan coba lagi.',
+      _ => 'Autentikasi gagal. Silakan coba lagi.',
     };
   }
 
@@ -398,7 +398,7 @@ class AuthService extends ChangeNotifier {
         'Layanan sedang tidak tersedia. Periksa koneksi lalu coba lagi.',
       'deadline-exceeded' =>
         'Permintaan terlalu lama. Periksa koneksi lalu coba lagi.',
-      _ => error.message ?? 'Terjadi kesalahan saat memuat data.',
+      _ => 'Terjadi kesalahan saat memuat data.',
     };
   }
 

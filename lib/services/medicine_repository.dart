@@ -7,6 +7,12 @@ import '../models/patient_pairing.dart';
 import '../models/treatment_plan.dart';
 import '../models/user_profile.dart';
 
+class MedicationScheduleFailure implements Exception {
+  const MedicationScheduleFailure(this.message);
+
+  final String message;
+}
+
 class MedicineRepository {
   MedicineRepository({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
@@ -244,26 +250,51 @@ class MedicineRepository {
     required int hour,
     required int minute,
   }) async {
+    if (caregiverId.trim().isEmpty) {
+      throw const MedicationScheduleFailure(
+        'Akun pengawas tidak valid. Silakan masuk kembali.',
+      );
+    }
+    if (patientId.trim().isEmpty) {
+      throw const MedicationScheduleFailure('Pasien wajib dipilih.');
+    }
     if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      throw ArgumentError('Waktu minum obat tidak valid.');
+      throw const MedicationScheduleFailure('Jam minum obat tidak valid.');
+    }
+
+    // Firestore rules authorize this again during commit. Checking the
+    // relationship here lets the user receive a clear, safe explanation
+    // instead of a generic permission error.
+    final pairingSnapshot = await _firestore
+        .collection('pairings')
+        .doc('${caregiverId}_$patientId')
+        .get();
+    if (!pairingSnapshot.exists) {
+      throw const MedicationScheduleFailure(
+        'Pasien belum terhubung dengan akun pengawas.',
+      );
     }
 
     final patientRef = _firestore.collection('users').doc(patientId);
     final patientSnapshot = await patientRef.get();
     final patientData = patientSnapshot.data();
     if (patientData == null || patientData['role'] != 'patient') {
-      throw StateError('Profil pasien tidak ditemukan.');
+      throw const MedicationScheduleFailure(
+        'Pasien yang dipilih tidak ditemukan.',
+      );
     }
     final group =
         patientData['treatmentGroup'] as String? ?? TreatmentPlan.group1;
     if (group != TreatmentPlan.group1) {
-      throw StateError('Aturan untuk kelompok terapi ini belum tersedia.');
+      throw const MedicationScheduleFailure(
+        'Jadwal otomatis belum tersedia untuk kelompok terapi ini.',
+      );
     }
     final startedValue =
         patientData['treatmentStartedAt'] ?? patientData['createdAt'];
     if (startedValue is! Timestamp) {
-      throw StateError(
-        'Tanggal mulai terapi belum tersedia. Minta pasien login kembali.',
+      throw const MedicationScheduleFailure(
+        'Tanggal mulai terapi pasien belum tersedia.',
       );
     }
     final treatmentStartedAt = startedValue.toDate();
@@ -288,6 +319,8 @@ class MedicineRepository {
       group: group,
       treatmentStartedAt: treatmentStartedAt,
     )) {
+      // One deterministic document per patient and treatment date prevents a
+      // repeated submit from creating a duplicate schedule record.
       final id = 'auto_${patientId}_${TreatmentPlan.dayKey(day)}';
       final scheduledAt = DateTime(day.year, day.month, day.day, hour, minute);
       final existing = existingById[id];
@@ -317,7 +350,6 @@ class MedicineRepository {
         writes++;
       } else if (existing.data()['status'] == 'pending') {
         batch.update(existing.reference, {
-          'name': 'MINUM OBAT',
           'scheduledAt': Timestamp.fromDate(scheduledAt),
           'scheduleRevision': FieldValue.increment(1),
           'alarmState': 'scheduled',
@@ -377,8 +409,8 @@ class MedicineRepository {
       'recipientId': patientId,
       'patientId': patientId,
       'type': 'caregiver_reminder',
-      'title': 'Pengingat dari pendamping',
-      'message': 'Pendamping mengingatkan Anda untuk memeriksa jadwal obat.',
+      'title': 'Pengingat dari pengawas',
+      'message': 'Pengawas mengingatkan Anda untuk memeriksa jadwal obat.',
       'read': false,
       'createdAt': FieldValue.serverTimestamp(),
     });

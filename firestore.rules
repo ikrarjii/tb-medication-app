@@ -3,6 +3,9 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function ownUser(userId) { return signedIn() && request.auth.uid == userId; }
+    function demoAccount() {
+      return signedIn() && request.auth.token.get('isDemo', false) == true;
+    }
     function role(name) {
       return signedIn() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == name;
@@ -35,12 +38,40 @@ service cloud.firestore {
         ((data.age < 18 && data.ageCategory == 'Anak') ||
          (data.age >= 18 && data.ageCategory == 'Dewasa'));
     }
+    function validBasicUserProfile(data) {
+      return data.fullName is string && data.fullName.size() > 0 &&
+        data.fullName.size() <= 120 &&
+        data.email is string && data.email.size() > 0 &&
+        data.email.size() <= 254 &&
+        data.phoneNumber is string && data.phoneNumber.size() <= 32 &&
+        data.notificationsEnabled is bool;
+    }
     function validNewUser() {
       let data = request.resource.data;
-      return data.role == 'caregiver' ||
-        (data.role == 'patient' && validPatientDemographics(data) &&
-         data.treatmentGroup in ['group1', 'other'] &&
-         data.treatmentStartedAt == request.time);
+      return validBasicUserProfile(data) && data.createdAt == request.time &&
+        ((data.role == 'caregiver' &&
+            data.keys().hasAll([
+              'fullName', 'email', 'phoneNumber', 'role',
+              'notificationsEnabled', 'createdAt'
+            ]) &&
+            data.keys().hasOnly([
+              'fullName', 'email', 'phoneNumber', 'role',
+              'notificationsEnabled', 'createdAt'
+            ])) ||
+         (data.role == 'patient' && validPatientDemographics(data) &&
+            data.treatmentGroup in ['group1', 'other'] &&
+            data.treatmentStartedAt == request.time &&
+            data.patientCode is string && data.patientCode.size() == 8 &&
+            data.keys().hasAll([
+              'fullName', 'email', 'phoneNumber', 'role', 'patientCode',
+              'age', 'ageCategory', 'gender', 'treatmentGroup',
+              'treatmentStartedAt', 'notificationsEnabled', 'createdAt'
+            ]) &&
+            data.keys().hasOnly([
+              'fullName', 'email', 'phoneNumber', 'role', 'patientCode',
+              'age', 'ageCategory', 'gender', 'treatmentGroup',
+              'treatmentStartedAt', 'notificationsEnabled', 'createdAt'
+            ])));
     }
     function validMedicineShape(data) {
       return data.patientId is string &&
@@ -98,16 +129,15 @@ service cloud.firestore {
     function validCaregiverScheduleRevision() {
       return !changed('scheduleRevision') ||
         (request.resource.data.scheduleRevision is int &&
-          ((resource.data.get('scheduleRevision', null) == null &&
-              request.resource.data.scheduleRevision == 1) ||
-           (resource.data.get('scheduleRevision', null) is int &&
+          ((resource.data.get('scheduleRevision', null) is int &&
               request.resource.data.scheduleRevision ==
-                resource.data.scheduleRevision + 1)));
+                resource.data.scheduleRevision + 1) ||
+           (!(resource.data.get('scheduleRevision', null) is int) &&
+              request.resource.data.scheduleRevision == 1)));
     }
     function validCaregiverMedicineUpdate() {
       let data = request.resource.data;
       return resource.data.status == 'pending' && data.status == 'pending' &&
-        validMedicineShape(data) &&
         changedOnly([
           'scheduledAt', 'updatedAt',
           'reminderTriggeredAt', 'deviceTriggeredAt',
@@ -117,6 +147,7 @@ service cloud.firestore {
           'takenAt', 'respondedAt'
         ]) &&
         changed('updatedAt') && data.updatedAt == request.time &&
+        (!changed('scheduledAt') || data.scheduledAt is timestamp) &&
         data.get('reminderTriggeredAt', null) == null &&
         data.get('deviceTriggeredAt', null) == null &&
         data.get('deviceTriggerPushedAt', null) == null &&
@@ -133,14 +164,25 @@ service cloud.firestore {
         data.get('respondedAt', null) == null &&
         resource.data.get('systemGenerated', false) == true &&
         data.systemGenerated == true &&
-        data.treatmentGroup == resource.data.treatmentGroup &&
-        data.treatmentDay == resource.data.treatmentDay &&
+        data.get('treatmentGroup', null) ==
+          resource.data.get('treatmentGroup', null) &&
+        data.get('treatmentDay', null) ==
+          resource.data.get('treatmentDay', null) &&
         validCaregiverScheduleRevision();
     }
 
     function validOwnUserUpdate() {
       let data = request.resource.data;
       let patient = resource.data.role == 'patient';
+      let commonFields = [
+        'fullName', 'phoneNumber', 'notificationsEnabled', 'fcmTokens',
+        'updatedAt'
+      ];
+      let patientFields = [
+        'fullName', 'phoneNumber', 'age', 'ageCategory', 'gender',
+        'patientCode', 'treatmentGroup', 'treatmentStartedAt',
+        'notificationsEnabled', 'fcmTokens', 'updatedAt'
+      ];
       let demographicsValid = !patient ||
         ((!changed('age') && !changed('ageCategory') && !changed('gender')) ||
          validPatientDemographics(data));
@@ -149,17 +191,52 @@ service cloud.firestore {
             (resource.data.get('treatmentGroup', null) == null &&
              data.treatmentGroup == 'group1')) &&
          (!changed('treatmentStartedAt') ||
-            (resource.data.get('treatmentStartedAt', null) == null &&
-             data.treatmentStartedAt == request.time)) &&
-         !changed('medicationHour') && !changed('medicationMinute') &&
-         !changed('medicationTimeUpdatedBy') &&
-         !changed('medicationTimeUpdatedAt'));
-      return data.role == resource.data.role && treatmentLocked &&
+             (resource.data.get('treatmentStartedAt', null) == null &&
+              data.treatmentStartedAt == request.time)) &&
+          !changed('medicationHour') && !changed('medicationMinute') &&
+          !changed('medicationTimeUpdatedBy') &&
+          !changed('medicationTimeUpdatedAt'));
+      return data.role == resource.data.role &&
+        ((patient && changedOnly(patientFields)) ||
+          (!patient && changedOnly(commonFields))) &&
+        changed('updatedAt') && data.updatedAt == request.time &&
+        (!changed('fullName') ||
+          (data.fullName is string && data.fullName.size() > 0 &&
+            data.fullName.size() <= 120)) &&
+        (!changed('phoneNumber') ||
+          (data.phoneNumber is string && data.phoneNumber.size() <= 32)) &&
+        (!changed('notificationsEnabled') || data.notificationsEnabled is bool) &&
+        (!changed('fcmTokens') ||
+          (data.fcmTokens is list && data.fcmTokens.size() <= 5)) &&
+        treatmentLocked &&
         demographicsValid &&
         (data.get('patientCode', null) == resource.data.get('patientCode', null) ||
          (resource.data.get('patientCode', null) == null &&
-          data.patientCode is string &&
-          getAfter(/databases/$(database)/documents/patientCodes/$(data.patientCode)).data.patientId == request.auth.uid));
+           data.patientCode is string &&
+           getAfter(/databases/$(database)/documents/patientCodes/$(data.patientCode)).data.patientId == request.auth.uid));
+    }
+    function validNewPairing(pairingId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'caregiverId', 'patientId', 'patientName', 'invitationCode',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'caregiverId', 'patientId', 'patientName', 'invitationCode',
+          'createdAt'
+        ]) &&
+        data.caregiverId == request.auth.uid &&
+        data.patientId is string && data.patientId != request.auth.uid &&
+        data.patientName is string && data.patientName.size() > 0 &&
+        data.patientName.size() <= 120 &&
+        data.invitationCode is string && data.invitationCode.size() == 8 &&
+        data.createdAt == request.time &&
+        pairingId == request.auth.uid + '_' + data.patientId &&
+        exists(/databases/$(database)/documents/users/$(data.patientId)) &&
+        get(/databases/$(database)/documents/users/$(data.patientId)).data.role == 'patient' &&
+        exists(/databases/$(database)/documents/patientCodes/$(data.invitationCode)) &&
+        get(/databases/$(database)/documents/patientCodes/$(data.invitationCode)).data.patientId == data.patientId &&
+        get(/databases/$(database)/documents/patientCodes/$(data.invitationCode)).data.patientName == data.patientName;
     }
 
     function validCaregiverMedicationTimeUpdate(userId) {
@@ -431,6 +508,14 @@ service cloud.firestore {
           'treatmentOutcome', 'reasoningPath', 'classificationReason',
           'lastClassificationUpdate', 'createdAt', 'updatedAt'
         ]) &&
+        data.keys().hasOnly([
+          'patientId', 'treatmentStartDate', 'expectedCompletionDate',
+          'actualCompletionDate', 'status', 'confirmedFailureType',
+          'failureNotes', 'conversionDetected', 'possibleReversal',
+          'confirmedReversal', 'confirmedFailure', 'treatmentOutcome',
+          'reasoningPath', 'classificationReason', 'lastClassificationUpdate',
+          'createdAt', 'updatedAt'
+        ]) &&
         data.patientId == patientId &&
         data.treatmentStartDate is timestamp &&
         data.expectedCompletionDate is timestamp &&
@@ -478,6 +563,11 @@ service cloud.firestore {
           'patientId', 'examinationType', 'scheduledDate', 'result',
           'notes', 'enteredByCaregiver', 'systemGenerated', 'createdAt',
           'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'patientId', 'examinationType', 'scheduledDate', 'examinationDate',
+          'result', 'notes', 'enteredByCaregiver', 'systemGenerated',
+          'createdAt', 'updatedAt'
         ]) &&
         data.patientId == patientId &&
         data.examinationType in ['initial', 'month_2', 'pre_final', 'final'] &&
@@ -531,6 +621,8 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      // isDemo is intentionally excluded from client create/update schemas.
+      // Admin SDK writes the marker; Functions trust its Auth custom claim.
       allow create: if ownUser(userId) &&
         request.resource.data.role in ['patient', 'caregiver'] &&
         validNewUser();
@@ -559,11 +651,7 @@ service cloud.firestore {
       allow read: if signedIn() &&
         (resource.data.caregiverId == request.auth.uid ||
          resource.data.patientId == request.auth.uid);
-      allow create: if role('caregiver') &&
-        request.resource.data.caregiverId == request.auth.uid &&
-        pairingId == request.auth.uid + '_' + request.resource.data.patientId &&
-        exists(/databases/$(database)/documents/patientCodes/$(request.resource.data.invitationCode)) &&
-        get(/databases/$(database)/documents/patientCodes/$(request.resource.data.invitationCode)).data.patientId == request.resource.data.patientId;
+      allow create: if role('caregiver') && validNewPairing(pairingId);
       allow delete: if signedIn() &&
         (resource.data.caregiverId == request.auth.uid ||
          resource.data.patientId == request.auth.uid);
@@ -599,10 +687,11 @@ service cloud.firestore {
 
     match /treatments/{patientId} {
       allow read: if ownUser(patientId) || caregiverFor(patientId);
-      allow create: if
+      allow create: if !demoAccount() &&
         (ownUser(patientId) || caregiverFor(patientId)) &&
         validInitialTreatmentMonitoring(patientId);
-      allow update: if validCaregiverTreatmentUpdate(patientId);
+      allow update: if !demoAccount() &&
+        validCaregiverTreatmentUpdate(patientId);
       allow delete: if false;
     }
 
@@ -610,13 +699,14 @@ service cloud.firestore {
       allow read: if signedIn() &&
         (resource.data.patientId == request.auth.uid ||
           caregiverFor(resource.data.patientId));
-      allow create: if
+      allow create: if !demoAccount() &&
         ((role('patient') && request.resource.data.patientId == request.auth.uid &&
             validGeneratedBtaSchedule(request.auth.uid)) ||
           (role('caregiver') &&
             caregiverFor(request.resource.data.patientId) &&
             validGeneratedBtaSchedule(request.resource.data.patientId)));
-      allow update: if validLegacyMonth3Migration() ||
+      allow update: if !demoAccount() && (
+        validLegacyMonth3Migration() ||
         validOwnerGeneratedBtaScheduleRepair() ||
         (role('caregiver') &&
           validCaregiverBtaWrite(
@@ -625,13 +715,23 @@ service cloud.firestore {
           ) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'examinationDate', 'result', 'notes', 'enteredByCaregiver', 'updatedAt'
-          ]));
+          ])));
       allow delete: if false;
     }
 
     match /reminders/{reminderId} {
       allow create: if role('caregiver') &&
+        request.resource.data.keys().hasAll([
+          'caregiverId', 'patientId', 'type', 'status', 'createdAt'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'caregiverId', 'patientId', 'type', 'status', 'createdAt'
+        ]) &&
         request.resource.data.caregiverId == request.auth.uid &&
+        request.resource.data.patientId is string &&
+        request.resource.data.type == 'caregiver_reminder' &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.createdAt == request.time &&
         caregiverFor(request.resource.data.patientId);
       allow read: if signedIn() &&
         (resource.data.caregiverId == request.auth.uid ||

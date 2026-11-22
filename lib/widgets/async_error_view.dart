@@ -10,8 +10,8 @@ class AsyncErrorView extends StatelessWidget {
     final value = error.toString().toLowerCase();
     if (value.contains('permission-denied') ||
         value.contains('insufficient permissions')) {
-      return 'Akses data ditolak. Pastikan akun Anda memiliki akses dan '
-          'aturan keamanan Firestore terbaru sudah diterapkan.';
+      return 'Akses data ditolak. Pastikan Anda menggunakan akun yang tepat '
+          'lalu coba kembali.';
     }
     if (value.contains('unavailable') || value.contains('network')) {
       return 'Koneksi ke server terputus. Periksa internet Anda lalu coba lagi.';

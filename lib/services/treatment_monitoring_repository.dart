@@ -46,7 +46,7 @@ class TreatmentMonitoringRepository {
     bool repairPendingSchedule = false,
   }) async {
     final start = profile.treatmentStartedAt;
-    if (profile.role != 'patient' || start == null) return;
+    if (profile.isDemo || profile.role != 'patient' || start == null) return;
     final treatmentRef = _firestore.collection('treatments').doc(profile.id);
     final schedules = _schedule(profile.id, start);
     // Querying by patientId is permitted by the existing Firestore read rule.

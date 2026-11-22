@@ -1,5 +1,6 @@
 const {createHash, randomUUID} = require("node:crypto");
 const {initializeApp} = require("firebase-admin/app");
+const {getAuth} = require("firebase-admin/auth");
 const {
   getFirestore,
   FieldValue,
@@ -44,6 +45,10 @@ async function tokensFor(userIds) {
 }
 
 async function sendPush(userIds, title, body, data, notificationKey) {
+  // FCM has no local emulator. Never send demo payloads to the real FCM API.
+  if (process.env.FUNCTIONS_EMULATOR === "true") {
+    return {permanentFailureCount: 0, successCount: 0, tokenCount: 0};
+  }
   const tokens = [...new Set(await tokensFor(userIds))];
   const stringData = Object.fromEntries(
     Object.entries(data || {}).map(([key, value]) => [key, String(value)]),
@@ -396,15 +401,15 @@ async function enqueueScheduleChange(action, medicineId, medicine) {
   const labels = {
     created: [
       "Jadwal obat ditambahkan",
-      `Jadwal ${medicineName} telah ditambahkan oleh pendamping.`,
+       `Jadwal ${medicineName} telah ditambahkan oleh pengawas.`,
     ],
     updated: [
       "Jadwal obat diperbarui",
-      `Jadwal ${medicineName} telah diperbarui oleh pendamping.`,
+       `Jadwal ${medicineName} telah diperbarui oleh pengawas.`,
     ],
     deleted: [
       "Jadwal obat dihapus",
-      `Jadwal ${medicineName} telah dihapus oleh pendamping.`,
+       `Jadwal ${medicineName} telah dihapus oleh pengawas.`,
     ],
   };
   const [title, body] = labels[action];
@@ -773,8 +778,8 @@ exports.onCaregiverReminderCreated = onDocumentCreated(
     await enqueuePushOnce(`patient_reminder_${event.params.reminderId}`, {
       recipientIds: [reminder.patientId],
       eventKey: "caregiver_reminder",
-      title: "Pengingat dari pendamping",
-      body: "Pendamping mengingatkan Anda untuk memeriksa jadwal obat.",
+    title: "Pengingat dari pengawas",
+    body: "Pengawas mengingatkan Anda untuk memeriksa jadwal obat.",
       data: {
         caregiverId: reminder.caregiverId || "",
         patientId: reminder.patientId,
@@ -814,6 +819,11 @@ async function ensureBtaMonitoring(patientId, patient) {
       !(patient.treatmentStartedAt instanceof Timestamp)) {
     return;
   }
+  // Profile fields are client data and cannot establish demo status securely.
+  // Only an Admin SDK managed Auth custom claim can suppress this trigger.
+  const authUser = await getAuth().getUser(patientId);
+  if (authUser.customClaims?.isDemo === true) return;
+
   const treatmentRef = db.collection("treatments").doc(patientId);
   const start = patient.treatmentStartedAt;
   const completion = addMonthsClamped(start, 6);
@@ -1024,6 +1034,15 @@ function safeEventPart(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "_");
 }
 
+function treatmentOutcomeLabel(outcome) {
+  return {
+    CURED: "SEMBUH",
+    "TREATMENT COMPLETED": "PENGOBATAN LENGKAP",
+    FAILED: "GAGAL",
+    "TREATMENT IN PROGRESS": "DALAM PENGOBATAN",
+  }[outcome] || "DALAM PENGOBATAN";
+}
+
 async function createTreatmentWarningNotifications({
   eventKey,
   message,
@@ -1080,8 +1099,8 @@ async function recalculateTreatmentOutcome(patientId, sourceKey) {
     await createTreatmentWarningNotifications({
       patientId,
       eventKey: `outcome_${safeEventPart(decision.outcome)}_${sourceKey}`,
-      title: "Treatment outcome updated",
-      message: `Decision Tree outcome changed to ${decision.outcome}.`,
+      title: "Hasil pengobatan diperbarui",
+      message: `Hasil pengobatan terbaru: ${treatmentOutcomeLabel(decision.outcome)}.`,
       type: "treatment_outcome_changed",
     });
   }
@@ -1090,8 +1109,8 @@ async function recalculateTreatmentOutcome(patientId, sourceKey) {
     await createTreatmentWarningNotifications({
       patientId,
       eventKey: `possible_reversal_${sourceKey}`,
-      title: "Possible bacteriological reversal",
-      message: "A positive BTA appeared after conversion. A repeat confirmation examination is required.",
+      title: "Kemungkinan reversi bakteriologis",
+      message: "BTA positif muncul setelah konversi. Diperlukan pemeriksaan ulang untuk konfirmasi.",
       type: "possible_reversal",
     });
   }
@@ -1116,8 +1135,8 @@ exports.onBtaExaminationWritten = onDocumentWritten(
       await createTreatmentWarningNotifications({
         patientId: data.patientId,
         eventKey: `possible_failure_${event.params.examinationId}_${updateMillis}`,
-        title: "Possible treatment failure",
-        message: "A follow-up BTA result is positive. Medical review and a repeat confirmation examination are required before classifying failure.",
+        title: "Kemungkinan kegagalan pengobatan",
+        message: "Hasil BTA tindak lanjut positif. Diperlukan evaluasi medis dan pemeriksaan ulang sebelum menetapkan kegagalan pengobatan.",
         type: "possible_treatment_failure",
       });
     }
@@ -1202,7 +1221,7 @@ exports.checkBtaExaminationReminders = onSchedule(
       }
       const windowEnd = addMonthsClamped(examination.scheduledDate, 1);
       const patient = await db.collection("users").doc(examination.patientId).get();
-      const patientName = patient.data()?.fullName || "Patient";
+      const patientName = patient.data()?.fullName || "Pasien";
       const labels = {
         initial: "pemeriksaan pertama pada bulan ke-1",
         month_2: "pemeriksaan kedua pada bulan ke-3",

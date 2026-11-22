@@ -22,6 +22,7 @@ class UserProfile {
     this.treatmentStartedAt,
     this.medicationHour,
     this.medicationMinute,
+    this.isDemo = false,
   });
 
   final String id;
@@ -44,6 +45,7 @@ class UserProfile {
   final DateTime? treatmentStartedAt;
   final int? medicationHour;
   final int? medicationMinute;
+  final bool isDemo;
 
   bool get hasMedicationTime =>
       medicationHour != null && medicationMinute != null;
@@ -99,6 +101,7 @@ class UserProfile {
       ),
       medicationHour: (data['medicationHour'] as num?)?.toInt(),
       medicationMinute: (data['medicationMinute'] as num?)?.toInt(),
+      isDemo: data['isDemo'] == true,
     );
   }
 }

@@ -41,7 +41,9 @@ class _TreatmentMonitoringPanelState extends State<TreatmentMonitoringPanel> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_initializationRequested || widget.profile.treatmentStartedAt == null) {
+    if (_initializationRequested ||
+        widget.profile.isDemo ||
+        widget.profile.treatmentStartedAt == null) {
       return;
     }
     _initializationRequested = true;
@@ -71,12 +73,22 @@ class _TreatmentMonitoringPanelState extends State<TreatmentMonitoringPanel> {
         if (treatmentSnapshot.hasError) {
           return AsyncErrorView(error: treatmentSnapshot.error);
         }
+        if (!treatmentSnapshot.hasData) {
+          return const Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: AppLoadingView(message: 'Memuat monitoring terapi…'),
+            ),
+          );
+        }
         final treatment = treatmentSnapshot.data;
         if (treatment == null) {
           return Card(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: _initializationError == null
+              child: widget.profile.isDemo
+                  ? const Text('Data monitoring terapi belum tersedia.')
+                  : _initializationError == null
                   ? const AppLoadingView(
                       message: 'Menyiapkan monitoring terapi…',
                     )
@@ -155,7 +167,9 @@ class _TreatmentMonitoringCompactSummaryState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_initializationRequested || widget.profile.treatmentStartedAt == null) {
+    if (_initializationRequested ||
+        widget.profile.isDemo ||
+        widget.profile.treatmentStartedAt == null) {
       return;
     }
     _initializationRequested = true;
@@ -289,6 +303,51 @@ class _MonitoringContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (profile.isDemo)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'RINGKASAN TERAPI',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoRow(
+                    label: 'Tanggal mulai',
+                    value: _date(context, treatment.treatmentStartDate),
+                  ),
+                  _InfoRow(
+                    label: 'Perkiraan selesai',
+                    value: _date(context, treatment.expectedCompletionDate),
+                  ),
+                  _InfoRow(label: 'Status', value: treatment.status.label),
+                  _InfoRow(
+                    label: 'Hasil terapi',
+                    value: _outcomeDisplayLabel(decision.outcome),
+                  ),
+                  _InfoRow(
+                    label: 'Konversi BTA',
+                    value: decision.conversionDetected
+                        ? 'Terdeteksi'
+                        : 'Belum terdeteksi',
+                  ),
+                  _InfoRow(
+                    label: 'Reversi BTA',
+                    value: decision.confirmedReversal
+                        ? 'Terkonfirmasi'
+                        : decision.possibleReversal
+                        ? 'Dugaan, perlu konfirmasi'
+                        : 'Tidak terdeteksi',
+                  ),
+                ],
+              ),
+            ),
+          ),
         if (isCaregiver)
           Card(
             child: Padding(
@@ -305,7 +364,7 @@ class _MonitoringContent extends StatelessWidget {
                               ?.copyWith(fontWeight: FontWeight.w900),
                         ),
                       ),
-                      if (isCaregiver)
+                      if (isCaregiver && !profile.isDemo)
                         IconButton(
                           tooltip: 'Perbarui status terapi',
                           onPressed: () => Navigator.push(
@@ -383,7 +442,7 @@ class _MonitoringContent extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Perlu perhatian pendamping',
+                    'Perlu perhatian pengawas',
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 8),
@@ -520,7 +579,7 @@ class _MonitoringContent extends StatelessWidget {
                 ),
                 subtitle: Text(_examinationDetails(context, exam)),
                 isThreeLine: true,
-                trailing: isCaregiver
+                trailing: isCaregiver && !profile.isDemo
                     ? IconButton(
                         tooltip: 'Isi hasil pemeriksaan',
                         onPressed: () =>
@@ -746,7 +805,7 @@ BtaExamination? _latestResult(List<BtaExamination> examinations) {
 }
 
 String _examinationDetails(BuildContext context, BtaExamination exam) {
-  final lines = <String>['Status: ${exam.result?.label ?? 'PENDING'}'];
+  final lines = <String>['Status: ${exam.result?.label ?? 'BELUM DIPERIKSA'}'];
   if (exam.examinationDate != null) {
     lines.add('Diperiksa: ${_date(context, exam.examinationDate!)}');
   }
